@@ -7,60 +7,100 @@ import Control.Monad (foldM, when)
 
 type Env n = Map.Map (Bound n) Type
 
-checkLoop :: Ord n => Loop n -> Maybe (Env n)
+data CheckError n
+ = CheckErrorNoSuchVar (Bound n)
+ | CheckErrorLoopVarNotInt Type
+ | CheckErrorFoldPartsDifferentType (Statement n) Type Type
+ | CheckErrorImpossibleStatement (Statement n)
+ | CheckErrorShadowing n
+ | CheckErrorPrimitiveBadArgs Prim [(Exp n, Type)]
+ deriving (Show)
+
+checkLoop :: Ord n => Loop n -> Either (CheckError n) (Env n)
 checkLoop l
  = do t <- checkX Map.empty (loopExp l)
-      when ((bindType $ loopBind l) /= t) Nothing
+      when (t /= IntT) (Left $ CheckErrorLoopVarNotInt t)
 
       -- Initialiser environment
       let ie0 = Map.empty
       -- Update environment
-      let ue0 = Map.singleton (BoundLet $ bindVar $ loopBind l) t
+      let ue0 = Map.singleton (BoundLet $ loopBind l) t
 
       (ie',_) <- foldM checkStage (ie0, ue0) (loopStages l)
       -- The result only includes things in the initial environment
       -- That is, it excludes LetUpdates etc.
       return ie'
 
-checkStage :: Ord n => (Env n,Env n) -> Stage n -> Maybe (Env n,Env n)
+checkStage :: Ord n => (Env n,Env n) -> Stage n -> Either (CheckError n) (Env n,Env n)
 checkStage (ie0,ue0) (Stage bs)
- = do ue1 <- foldM insertPreStmt ue0 bs
-      foldM checkStmt (ie0,ue1) bs
+ = do (ie1,ue1) <- foldM insertPreStmt (ie0,ue0) bs
+      ue2       <- foldM checkStmt ue1 bs
+      return (ie1,ue2)
  where
-  insertPreStmt ue (Fold (Bind v t) _ _)
-   = do checkNoShadowing v ue
-        return $ Map.insert (BoundFoldCurrent v) t ue
-  insertPreStmt ue LetUpdate{}
-   =    return ue
+  insertPreStmt (ie,ue) (Fold v z _)
+   = do checkNoShadowing v ie
+        checkNoShadowing v ue
+        tz <- checkX ie z
+        let ins = Map.insert (BoundFoldCurrent v) tz
+        return (ins ie, ins ue)
+  insertPreStmt (ie,ue) LetUpdate{}
+   =    return (ie,ue)
 
-checkStmt :: Ord n => (Env n,Env n) -> Statement n -> Maybe (Env n,Env n)
-checkStmt (ie0,ue0) s
+checkStmt :: Ord n => Env n -> Statement n -> Either (CheckError n) (Env n)
+checkStmt ue0 s
  = case s of
-   Fold (Bind v t) z k 
-    -> do tz  <- checkX ie0 z
-          tk  <- checkX ue0 k
-          when (t /= tz || tz /= tk) Nothing
-          checkNoShadowing v ie0
-          let ie1 = Map.insert (BoundFoldCurrent v) t ie0
+   Fold v z k 
+    | Just tz <- Map.lookup (BoundFoldCurrent v) ue0
+    -> do tk  <- checkX ue0 k
+          when (tk /= tz) (Left $ CheckErrorFoldPartsDifferentType s tz tk)
           -- ue has already been checked for shadowing,
           -- and already contains BoundFoldCurrent.
           -- Next stmt can refer to BoundFoldNew though
-          let ue1 = Map.insert (BoundFoldNew v) t ue0
-          return (ie1, ue1)
+          return $ Map.insert (BoundFoldNew v) tk ue0
+    | otherwise
+    -> Left $ CheckErrorImpossibleStatement s
 
-   LetUpdate (Bind v t) k
+   LetUpdate v k
     -> do tk  <- checkX ue0 k
-          when (t /= tk) Nothing
           checkNoShadowing v ue0
-          let ue1 = Map.insert (BoundLet v) t ue0
-          return (ie0, ue1)
+          return $ Map.insert (BoundLet v) tk ue0
 
 
-checkNoShadowing :: Ord n => n -> Env n -> Maybe ()
+checkNoShadowing :: Ord n => n -> Env n -> Either (CheckError n) ()
 checkNoShadowing v e
- = when (anybound [BoundFoldCurrent v, BoundFoldNew v, BoundLet v]) Nothing
+ = when (anybound [BoundFoldCurrent v, BoundFoldNew v, BoundLet v])
+ $ Left $ CheckErrorShadowing v
  where
   anybound
    = any (flip Map.member e)
 
+
+checkP :: Prim -> [(Exp n, Type)] -> Either (CheckError n) Type
+checkP p xts
+ = case p of
+    PrimAdd
+     | [IntT,IntT] <- ts
+     -> return IntT
+     | otherwise
+     -> Left $ CheckErrorPrimitiveBadArgs p xts
+ where
+  ts = fmap snd xts
+
+checkV :: Value -> Either (CheckError n) Type
+checkV v
+ = case v of
+    VInt _ -> return IntT
+
+checkX :: Ord n => Env n -> Exp n -> Either (CheckError n) Type
+checkX env x
+ = case x of
+    XVar n
+     | Just t <- Map.lookup n env
+     -> return t
+     | otherwise
+     -> Left $ CheckErrorNoSuchVar n
+    XValue v -> checkV v
+    XPrim p xs
+     -> do ts <- mapM (checkX env) xs
+           checkP p (xs `zip` ts)
 

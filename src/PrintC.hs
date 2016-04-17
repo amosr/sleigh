@@ -1,4 +1,4 @@
-module Print where
+module PrintC where
 import Prim
 import Sleigh
 
@@ -47,8 +47,7 @@ printLoop l
  where
   loopIteration
    = let b  = loopBind l
-         v  = bindVar  b
-         v' = BoundLet v
+         v' = BoundLet b
          x  = loopExp  l
      in printBindAs BoundLet b "0"
         ++ " "
@@ -93,6 +92,7 @@ printStageBodyEnd (Stage sts)
     =[]
 
 
-printBindAs :: (Var -> Bound Var) -> Bind Var -> String -> String
-printBindAs f (Bind v t) init
- = printType t ++ " " ++ printBound (f v) ++ " = " ++ init ++ ";"
+printBindAs :: (Var -> Bound Var) -> Var -> String -> String
+printBindAs f v init
+ -- TODO: type annotations
+ = printType IntT ++ " " ++ printBound (f v) ++ " = " ++ init ++ ";"

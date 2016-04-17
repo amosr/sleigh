@@ -1,7 +1,7 @@
-{-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE DeriveFunctor #-}
 module Prim where
 
+import qualified Data.Set as Set
 import qualified Data.Map as Map
 
 type Var = String
@@ -18,31 +18,27 @@ data Value = VInt Int
 
 -- | Very simple expressions
 data Exp n
- = XVar n
+ = XVar (Bound n)
  | XValue Value
  | XPrim Prim [Exp n]
  deriving (Eq, Ord, Show, Functor)
 
-checkP :: Prim -> [Type] -> Maybe Type
-checkP p ts
- = case p of
-    PrimAdd
-     | [IntT,IntT] <- ts
-     -> Just IntT
-     | otherwise
-     -> Nothing
+-- | Reference to a bound variable
+data Bound n
+ = BoundFoldCurrent n
+ | BoundFoldNew     n
+ | BoundLet         n
+  deriving (Eq, Ord, Show, Functor)
 
-checkV :: Value -> Maybe Type
-checkV v
- = case v of
-    VInt _ -> Just IntT
-
-checkX :: Ord n => Map.Map n Type -> Exp n -> Maybe Type
-checkX env x
+freeOfExp :: Ord n => Exp n -> Set.Set n
+freeOfExp x
  = case x of
-    XVar n   -> Map.lookup n env
-    XValue v -> checkV v
-    XPrim p xs
-     -> do ts <- mapM (checkX env) xs
-           checkP p ts
+    XVar b      -> Set.singleton $ freeOfBound b
+    XValue _    -> Set.empty
+    XPrim _ xs  -> Set.unions $ fmap freeOfExp xs
+
+freeOfBound :: Ord n => Bound n -> n
+freeOfBound (BoundFoldCurrent n) = n
+freeOfBound (BoundFoldNew     n) = n
+freeOfBound (BoundLet         n) = n
 

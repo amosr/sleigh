@@ -2,21 +2,25 @@ module Example where
 import Prim
 import Sleigh
 import Check
-import Print
+import PrintS
 import Transform
+import Eval
 
 example :: Loop Var
 example
- = Loop (b "loop") (i 100)
+ = Loop "loop" (i 5)
  [ Stage
-  [ Fold (b "count") (i 0) (bfc "count" `plus` i 1) ]
+  [ Fold "count" (i 0) (bfc "count" `plus` i 1) ]
  , Stage
-  [ Fold (b "sum") (i 0) (bfc "sum" `plus` bl "loop")
-  , LetUpdate (b "sumsum") (bfc "count" `plus` bfc "sum" `plus` bfn "sum")]
+  [ Fold "sum" (i 0) (bfc "sum" `plus` bl "loop")
+  , LetUpdate "sumsum" (bfc "count" `plus` bfc "sum" `plus` bfn "sum")]
+ , Stage
+  [ Fold "a" (i 0) (bfc "b" `plus` i 1)
+  , Fold "b" (i 1) (bfc "a" `plus` i 1)
+  ]
  ]
 
  where
-  b v = Bind v IntT
   bfc = XVar . BoundFoldCurrent
   bfn = XVar . BoundFoldNew
   bl  = XVar . BoundLet

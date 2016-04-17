@@ -2,20 +2,16 @@
 module Sleigh where
 import Prim
 
-data Bind n
- = Bind {
-   bindVar  :: n
- , bindType :: Type }
- deriving (Eq, Ord, Show, Functor)
+import qualified Data.Set as Set
 
 -- | An entire loop
 data Loop n
  = Loop {
    -- | Loop iterator: name to give whatever we loop over.
    -- This is bound as a LetUpdate and so cannot be referenced from initialisers.
-   loopBind   :: Bind n
+   loopBind   :: n
    -- | Whatever we loop over
- , loopExp    :: Exp (Bound n)
+ , loopExp    :: Exp n
    -- | What to perform
  , loopStages :: [Stage n] }
  deriving (Show, Functor)
@@ -50,20 +46,23 @@ data Statement n
  -- previous folds, as well as the start-of-iteration value (BoundFoldCurrent) of folds in
  -- this stage, as well as previous folds.
  -- It can also refer to the loop iterator and previous LetUpdates.
- = Fold       (Bind n) (Exp (Bound n)) (Exp (Bound n))
+ = Fold       n (Exp n) (Exp n)
  -- | Update let bindings.
  -- This can refer to the same things as a fold update: new and start-of-iteration values of folds,
  -- the current loop iterator, and previous LetUpdates.
- | LetUpdate  (Bind n) (Exp (Bound n))
+ | LetUpdate  n (Exp n)
  deriving (Show, Functor)
 
 
--- | Reference to a bound variable
-data Bound n
- = BoundFoldCurrent n
- | BoundFoldNew     n
- | BoundLet         n
-  deriving (Eq, Ord, Show, Functor)
+type Exp' = Exp Var
 
-type Exp' = Exp (Bound Var)
+bindOfStatement :: Statement n -> n
+bindOfStatement (Fold n _ _)     = n
+bindOfStatement (LetUpdate n _)  = n
+
+freeOfStatement :: Ord n => Statement n -> Set.Set n
+freeOfStatement (Fold _ z k)
+ = freeOfExp k `Set.union` freeOfExp z
+freeOfStatement (LetUpdate _ k)
+ = freeOfExp k
 
